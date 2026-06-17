@@ -1,0 +1,103 @@
+{
+  "_comment": "桌前健康关怀助手配置。阈值因人/摄像头/光线而异，可在看板观察实时值后微调。",
+
+  "camera_index": 0,
+  "frame_width": 640,
+  "frame_height": 480,
+  "target_fps": 15,
+  "pose_interval": 0.33,
+  "sample_interval": 30,
+
+  "away_seconds": 5,
+  "distracted_yaw_deg": 25,
+  "distracted_pitch_deg": 22,
+  "distracted_grace_seconds": 2.5,
+
+  "ear_closed_threshold": 0.19,
+  "drowsy_closed_seconds": 1.5,
+  "perclos_window_seconds": 60,
+  "perclos_drowsy_ratio": 0.4,
+  "mar_yawn_threshold": 0.6,
+  "yawn_min_seconds": 1.2,
+  "blink_min_seconds": 0.08,
+
+  "comfort_distance_cm": 60,
+  "min_distance_cm": 45,
+  "eye_break_minutes": 20,
+  "dry_eye_blink_rate": 8,
+  "dry_eye_seconds": 30,
+
+  "slouch_drop_ratio": 0.18,
+  "sedentary_minutes": 45,
+
+  "posture": {
+    "calib_frames": 25,
+    "smooth_alpha": 0.35,
+    "min_visibility": 0.6,
+    "enter_hold_sec": 2.5,
+    "exit_hold_sec": 2.0,
+    "neck_drop_enter": 0.15,
+    "neck_drop_exit": 0.09,
+    "fwd_rise_enter": 0.15,
+    "fwd_rise_exit": 0.09,
+    "shoulder_tilt_deg": 6.0,
+    "shoulder_tilt_exit_deg": 3.5,
+    "head_tilt_deg": 9.0,
+    "body_lean_ratio": 0.16
+  },
+
+  "rppg_buffer": 300,
+  "rppg_min_samples": 150,
+  "rppg_calc_interval": 2.0,
+  "rppg_quality_min": 0.06,
+  "high_stress_threshold": 60,
+
+  "affect": {
+    "smooth_alpha": 0.08
+  },
+  "env": {
+    "dark_lum": 55,
+    "bright_lum": 230,
+    "smooth_alpha": 0.05,
+    "hold_sec": 12
+  },
+  "rhythm": {
+    "talk_mar": 0.42,
+    "talk_min_openings": 5,
+    "talk_window_sec": 12,
+    "talk_release_sec": 6,
+    "defer_types": ["need_move", "need_eye_break"],
+    "max_defer_sec": 150,
+    "quiet_hours": [],
+    "dnd": false
+  },
+
+  "daily_report": true,
+  "report_interval": 600,
+  "score_streak_threshold": 70,
+  "obsidian_health_dir": "G:\\ClaudeCode应用\\70-健康日志",
+
+  "auto_lock": false,
+  "auto_lock_seconds": 30,
+
+  "pet_integration": true,
+
+  "sound_alert": true,
+  "reminder_default_cooldown": 120,
+  "reminder_cooldowns": {
+    "drowsy": 90,
+    "slouch": 60,
+    "high_shoulder": 90,
+    "need_move": 300,
+    "need_eye_break": 300,
+    "dry_eye": 180,
+    "too_close": 60,
+    "high_stress": 300,
+    "dark_env": 600
+  },
+
+  "privacy_no_video_save": true,
+  "dashboard_host": "127.0.0.1",
+  "dashboard_port": 5005,
+  "db_path": "monitor.db"
+}

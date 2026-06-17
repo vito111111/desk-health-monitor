@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+
+# 运行数据（仅本机，不入库）
+*.db
+health_reports/
+
+# MediaPipe 模型较大，首次运行联网下载（见 README），不入库
+models/*.task
+
+# 临时测试
+_test_*.py
+_feat*
