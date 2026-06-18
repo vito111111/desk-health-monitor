@@ -19,6 +19,13 @@ import datetime
 import urllib.parse
 import urllib.request
 
+# 中国区华米端点同样须绕过本机 SSH 隧道代理(美国出口连不上)。
+for _v in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+           "ALL_PROXY", "all_proxy"):
+    os.environ.pop(_v, None)
+os.environ["NO_PROXY"] = "*"
+os.environ["no_proxy"] = "*"
+
 from sensors.wearable import WearableSource
 
 CFG_FILE = os.path.join(os.path.expanduser("~"), ".claude",
@@ -67,9 +74,14 @@ class AmazfitSource(WearableSource):
         token, userid = cfg.get("apptoken"), cfg.get("userid")
         if not (token and userid):
             return None
-        region = cfg.get("region", "de2")
+        # 优先用登录脚本探测到的 data_host(中国区如 api-mifit-cn2.huami.com);
+        # 否则回退 region 拼接(老配置兼容)。
+        host = cfg.get("data_host")
+        if not host:
+            region = cfg.get("region", "de2")
+            host = "api-mifit-{}.huami.com".format(region)
         today = datetime.date.today().isoformat()
-        base = "https://api-mifit-{}.huami.com/v1/data/band_data.json".format(region)
+        base = "https://{}/v1/data/band_data.json".format(host)
         qs = urllib.parse.urlencode({
             "query_type": "summary", "device_type": "android_phone",
             "userid": userid, "from_date": today, "to_date": today})
