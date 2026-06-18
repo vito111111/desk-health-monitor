@@ -50,6 +50,15 @@ class PetBridge:
         return sorted(cand, key=lambda t: _PRIORITY.index(t)
                       if t in _PRIORITY else 99)[0]
 
+    def push_event(self, ev):
+        """主动推送一条非周期事件(如健康干预 alert)到桌宠, 复用 camera 源的事件通道。
+        ev: {type,title,body,routine}。沿用上次的 factors, 不改变健康因素本身。"""
+        if not self.enabled or not ev:
+            return
+        self._writer.write(present=None, factors=list(self._last_factors or []),
+                           event=ev)
+        self._last_write = time.time()
+
     def update(self, present, factors, event=None, metrics=None, force=False):
         """每个监测周期调用。
         factors: 当前活跃不健康因素列表; event: 本轮新触发的建议类型(可 None);

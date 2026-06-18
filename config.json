@@ -72,6 +72,25 @@
     "dnd": false
   },
 
+  "_intervention_comment": "主动健康干预: 读累积统计->本地规则识别风险->claude CLI 生成行动建议, 落盘+归档 Obsidian, alert 级风险主动推送桌宠。非医疗诊断。",
+  "intervention": {
+    "enabled": true,
+    "interval_sec": 14400,
+    "use_llm": true,
+    "sleep_debt_min": 360,
+    "sleep_debt_days": 3,
+    "resting_hr_warn": 75,
+    "resting_hr_rise": 6,
+    "low_steps": 3000,
+    "low_steps_days": 3,
+    "stress_warn": 60,
+    "stress_days": 3,
+    "slouch_ratio_warn": 30,
+    "slouch_days": 3,
+    "low_score": 55,
+    "low_score_days": 3
+  },
+
   "daily_report": true,
   "report_interval": 600,
   "score_streak_threshold": 70,

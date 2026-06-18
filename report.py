@@ -88,6 +88,32 @@ def build_markdown(store, cfg, day=None):
         lines.append(f"- 提醒触发：{rem}")
     lines.append("")
 
+    # 穿戴设备(佳明/华米): 有数据才出这一节
+    wd = store.wearable_summary(day)
+    if wd:
+        lines.append("## ⌚ 穿戴设备")
+        src = "、".join(wd.get("sources") or []) or "穿戴设备"
+        parts = []
+        if wd.get("steps") is not None:
+            parts.append(f"步数 **{wd['steps']}**")
+        if wd.get("resting_hr") is not None:
+            parts.append(f"静息心率 **{wd['resting_hr']}** bpm")
+        if wd.get("sleep_min") is not None:
+            sm = wd["sleep_min"]
+            parts.append(f"睡眠 **{sm // 60}h{sm % 60}m**")
+        lines.append(f"- 来源 {src}：" + "　·　".join(parts) if parts else f"- 来源 {src}")
+        wtrend = store.wearable_trend(7)
+        if any(w.get("steps") is not None or w.get("sleep_min") is not None for w in wtrend):
+            lines.append("")
+            lines.append("| 日期 | 步数 | 静息心率 | 睡眠 |")
+            lines.append("|---|---|---|---|")
+            for w in wtrend:
+                sm = w.get("sleep_min")
+                slp = f"{sm // 60}h{sm % 60}m" if sm is not None else "—"
+                lines.append(f"| {w['day'][5:]} | {w.get('steps') if w.get('steps') is not None else '—'} "
+                             f"| {w.get('resting_hr') if w.get('resting_hr') is not None else '—'} | {slp} |")
+        lines.append("")
+
     lines.append("## 近 7 日健康分趋势")
     lines.append("| 日期 | 分 | 专注率 | 坐姿不良 | 疲劳(min) |")
     lines.append("|---|---|---|---|---|")

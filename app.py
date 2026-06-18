@@ -182,6 +182,16 @@ MANAGE = r"""
 <h1>团队/个人健康概览 · 管理视图</h1>
 <div class="sub"><span class="pill">脱敏聚合 · 无原始画面 · 可共享</span>
  · 使用前请告知并征得被监测者同意 · <a href="/">← 返回自用视图</a></div>
+<div class="card" id="intervcard" style="max-width:1100px;display:none;border-color:#3a4a6a">
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+  <div style="color:var(--mut);font-size:13px">🩺 主动健康干预 · <span id="iv_badge"></span></div>
+  <div class="foot" id="iv_date"></div>
+ </div>
+ <div id="iv_advice" style="font-size:14px;line-height:1.7;margin:6px 0 12px"></div>
+ <div id="iv_risks"></div>
+ <div class="foot" style="margin-top:10px">方法：三路传感(手表/运动/视频) × 循证领域模型 × JITAI 适时干预。
+  <span id="iv_disclaimer"></span></div>
+</div>
 <div class="card" style="max-width:1100px">
  <div style="color:var(--mut);font-size:13px;margin-bottom:10px">今日健康 KPI · <span id="day"></span></div>
  <div class="kpis">
@@ -194,6 +204,17 @@ MANAGE = r"""
   <div><div class="big" id="away">--</div><div class="foot">离岗次数</div></div>
   <div><div class="big" id="remtot">--</div><div class="foot">关怀提醒次数</div></div>
  </div>
+</div>
+<div class="card" id="wearcard" style="max-width:1100px;display:none">
+ <div style="color:var(--mut);font-size:13px;margin-bottom:10px">⌚ 穿戴设备 · <span id="wearsrc"></span></div>
+ <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+  <div><div class="big" id="w_steps">--</div><div class="foot">今日步数</div></div>
+  <div><div class="big" id="w_rhr">--</div><div class="foot">静息心率 bpm</div></div>
+  <div><div class="big" id="w_sleep">--</div><div class="foot">昨夜睡眠</div></div>
+ </div>
+ <table style="margin-top:14px"><thead><tr><th>日期</th><th>步数</th><th>静息心率</th><th>睡眠</th></tr></thead>
+ <tbody id="weartrend"></tbody></table>
+ <div class="foot">穿戴数据经 Garmin/华米云同步至本机后入库，与摄像头指标合并评估健康。</div>
 </div>
 <div class="card" style="max-width:1100px">
  <div style="color:var(--mut);font-size:13px;margin-bottom:8px">近 7 日趋势</div>
@@ -216,8 +237,34 @@ async function load(){try{
  document.getElementById('remtot').textContent=remSum(t.reminders);
  document.getElementById('trend').innerHTML=d.week.map(w=>
   `<tr><td>${w.day}</td><td><b>${w.score==null?'—':w.score}</b></td><td>${w.focus_minutes}</td><td>${w.focus_rate}%</td><td>${w.drowsy_minutes}</td><td>${w.slouch_ratio}%</td><td>${w.avg_bpm||'--'}</td><td>${w.avg_stress||'--'}</td><td>${remSum(w.reminders)}</td></tr>`).join('');
+ // 穿戴设备
+ const slp=m=>m==null?'--':(Math.floor(m/60)+'h'+(m%60)+'m');
+ const wd=d.wearable;
+ if(wd){document.getElementById('wearcard').style.display='';
+  document.getElementById('wearsrc').textContent=(wd.sources||[]).join(' / ');
+  document.getElementById('w_steps').textContent=wd.steps==null?'--':wd.steps;
+  document.getElementById('w_rhr').textContent=wd.resting_hr==null?'--':wd.resting_hr;
+  document.getElementById('w_sleep').textContent=slp(wd.sleep_min);
+  document.getElementById('weartrend').innerHTML=(d.wearable_week||[]).map(w=>
+   `<tr><td>${w.day.slice(5)}</td><td>${w.steps==null?'—':w.steps}</td><td>${w.resting_hr==null?'—':w.resting_hr}</td><td>${slp(w.sleep_min)}</td></tr>`).join('');
+ }
+}catch(e){}}
+const LVL={alert:['🔴','需要关注','#e63c3c'],warn:['🟡','留意','#f0a91e'],ok:['🟢','状态平稳','#5ac86b']};
+async function loadInterv(){try{
+ const v=await (await fetch('/api/intervention')).json();
+ if(!v||!v.advice){return;}
+ document.getElementById('intervcard').style.display='';
+ const lv=LVL[v.level]||LVL.ok;
+ const bd=document.getElementById('iv_badge');bd.textContent=lv[0]+' '+lv[1];bd.style.color=lv[2];
+ document.getElementById('iv_date').textContent=v.date||'';
+ document.getElementById('iv_advice').textContent=v.advice;
+ document.getElementById('iv_risks').innerHTML=(v.risks||[]).map(r=>{
+  const m=r.level==='alert'?'🔴':'🟡';
+  return `<div class="foot" style="margin:3px 0"><b>${m} ${r.title}</b> — ${r.evidence}　<span style="opacity:.7">（${r.domain||''} · ${r.model||''} · ${r.stream||''}）</span></div>`;}).join('');
+ document.getElementById('iv_disclaimer').textContent=v.disclaimer||'';
 }catch(e){}}
 load();setInterval(load,5000);
+loadInterv();setInterval(loadInterv,30000);
 </script></body></html>
 """
 
@@ -260,7 +307,15 @@ def dnd():
 
 @app.route("/api/health")
 def health():
-    return jsonify({"today": store.health_summary(), "week": store.weekly_trend(7)})
+    return jsonify({"today": store.health_summary(), "week": store.weekly_trend(7),
+                    "wearable": store.wearable_summary(),
+                    "wearable_week": store.wearable_trend(7)})
+
+
+@app.route("/api/intervention")
+def intervention_api():
+    import intervention
+    return jsonify(intervention.read_state() or {})
 
 
 @app.route("/api/recalibrate", methods=["POST"])

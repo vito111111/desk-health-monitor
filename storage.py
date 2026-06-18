@@ -29,6 +29,10 @@ class Store:
             c.execute("ALTER TABLE samples ADD COLUMN tension INTEGER DEFAULT 0")
         except sqlite3.OperationalError:
             pass
+        # 穿戴设备日数据(佳明/华米): 每天每源一行, 幂等 upsert(同日覆盖, 缺项保留旧值)
+        c.execute("CREATE TABLE IF NOT EXISTS wearable_daily("
+                  "day TEXT, source TEXT, steps INTEGER, resting_hr INTEGER, "
+                  "sleep_min INTEGER, ts REAL, PRIMARY KEY(day, source))")
         c.commit()
 
     # ---------- 写入 ----------
@@ -52,6 +56,25 @@ class Store:
                 "VALUES(?,?,?,?,?,?,?)",
                 (ts, int(bpm or 0), int(stress or 0), 1 if slouch else 0,
                  float(seated or 0), float(screen or 0), int(tension or 0)))
+            self._conn.commit()
+
+    def log_wearable(self, source, metrics, ts=None, day=None):
+        """穿戴源日数据 upsert(同日同源覆盖)。缺项(如睡眠尚未同步)用 COALESCE 保留旧值,
+        避免半天没睡眠数据时把早先已拉到的值清空。"""
+        ts = ts or time.time()
+        d = (day or dt.date.today()).isoformat()
+        steps = metrics.get("steps")
+        rhr = metrics.get("resting_hr")
+        sleep = metrics.get("sleep_min")
+        with self.lock:
+            self._conn.execute(
+                "INSERT INTO wearable_daily(day,source,steps,resting_hr,sleep_min,ts) "
+                "VALUES(?,?,?,?,?,?) ON CONFLICT(day,source) DO UPDATE SET "
+                "steps=COALESCE(excluded.steps,wearable_daily.steps),"
+                "resting_hr=COALESCE(excluded.resting_hr,wearable_daily.resting_hr),"
+                "sleep_min=COALESCE(excluded.sleep_min,wearable_daily.sleep_min),"
+                "ts=excluded.ts",
+                (d, source, steps, rhr, sleep, ts))
             self._conn.commit()
 
     # ---------- 聚合 ----------
@@ -142,6 +165,39 @@ class Store:
             "slouch_ratio": round((slouch_ratio or 0) * 100, 1),
             "reminders": self.reminder_counts(day),
         }
+
+    def wearable_summary(self, day=None):
+        """当日穿戴数据(跨源合并: 步数取最大, 静息心率/睡眠取最近写入的非空值)。
+        无任何穿戴源数据时返回 None。"""
+        d = (day or dt.date.today()).isoformat()
+        with self.lock:
+            rows = self._conn.execute(
+                "SELECT source,steps,resting_hr,sleep_min,ts FROM wearable_daily "
+                "WHERE day=? ORDER BY ts", (d,)).fetchall()
+        if not rows:
+            return None
+        out = {"day": d, "sources": [], "steps": None,
+               "resting_hr": None, "sleep_min": None}
+        for src, steps, rhr, sleep, ts in rows:
+            out["sources"].append(src)
+            if steps is not None:
+                out["steps"] = max(out["steps"] or 0, steps)
+            if rhr is not None:
+                out["resting_hr"] = rhr      # 按 ts 升序, 最后一条即最近
+            if sleep is not None:
+                out["sleep_min"] = sleep
+        return out
+
+    def wearable_trend(self, days=7):
+        today = dt.date.today()
+        out = []
+        for i in range(days - 1, -1, -1):
+            d = today - dt.timedelta(days=i)
+            ws = self.wearable_summary(d) or {"day": d.isoformat(),
+                                              "steps": None, "resting_hr": None,
+                                              "sleep_min": None, "sources": []}
+            out.append(ws)
+        return out
 
     def avg_tension(self, day=None):
         start, end = self._day_bounds(day)

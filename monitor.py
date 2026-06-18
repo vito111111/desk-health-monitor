@@ -23,7 +23,12 @@ from modules.env import EnvLightAnalyzer
 from modules.rhythm import RhythmController
 from reminders import ReminderManager
 from pet_bridge import PetBridge
+import health_state
+import intervention
 import report
+
+# 穿戴源名(读 health_state 聚合时只采这些源的日数据入库)
+WEARABLE_SOURCES = ("garmin", "amazfit", "watch")
 
 # 在岗状态(用于专注时间线)
 STATE_AWAY, STATE_DROWSY, STATE_DISTRACTED, STATE_FOCUSED = "away", "drowsy", "distracted", "focused"
@@ -60,6 +65,7 @@ class Monitor:
         self.fps = 0.0
         self.active_reminders = []
         self._await_break = False   # 已建议起身、等待用户实际起身(依从率)
+        self._intervention_busy = False   # 干预生成(含 LLM)在后台线程跑, 防重入
 
     def _decide_state(self, now, present, drowsy, looking_away):
         cfg = self.cfg
@@ -90,6 +96,8 @@ class Monitor:
         last_pose_t = 0.0
         last_sample_t = 0.0
         last_report_t = start
+        last_wearable_t = 0.0
+        last_interv_t = 0.0
         pose_m = self.posture.metrics
         face_ts = pose_ts = 0   # 各自单调递增的毫秒时间戳
 
@@ -203,6 +211,30 @@ class Monitor:
                         tension=aff.get("tension", 0) if aff.get("valid") else 0, ts=now)
                     last_sample_t = now
 
+                # 周期采集穿戴源(佳明/华米)日数据 -> 入库(管理视图/日报/趋势/干预)
+                if (self.store
+                        and now - last_wearable_t >= cfg.get("wearable_poll_interval", 300)):
+                    try:
+                        st = health_state.read_state()
+                        for src, rec in (st or {}).get("sources", {}).items():
+                            if src in WEARABLE_SOURCES:
+                                m = rec.get("metrics") or {}
+                                if any(k in m for k in ("steps", "resting_hr", "sleep_min")):
+                                    self.store.log_wearable(src, m, now)
+                    except Exception:
+                        pass
+                    last_wearable_t = now
+
+                # 周期主动健康干预(读累积统计 -> 规则风险 + LLM 建议, 后台线程跑不阻塞采集)
+                if (self.store and cfg.get("intervention", {}).get("enabled", True)
+                        and not self._intervention_busy
+                        and now - last_interv_t >= cfg.get("intervention", {}).get(
+                            "interval_sec", 14400)):
+                    self._intervention_busy = True
+                    threading.Thread(target=self._run_intervention,
+                                     daemon=True).start()
+                    last_interv_t = now
+
                 # 周期归档健康日报(Obsidian)
                 if (self.store and cfg.get("daily_report", True)
                         and now - last_report_t >= cfg.get("report_interval", 600)):
@@ -281,6 +313,26 @@ class Monitor:
             "rhythm": dict(self.rhythm.metrics),
             "reminders": list(self.active_reminders),
         }
+
+    def _run_intervention(self):
+        """后台线程: 生成主动健康干预(规则风险 + LLM 文案), 落盘/归档;
+        若有 alert 级风险, 经智能节律门控后主动推送一次(提醒 + 桌宠事件)。"""
+        try:
+            use_llm = self.cfg.get("intervention", {}).get("use_llm", True)
+            result = intervention.run_once(self.store, self.cfg, use_llm=use_llm)
+            ev = intervention.urgent_event(result)
+            if ev and not self.rhythm.metrics.get("dnd"):
+                # 复用桌宠事件通道主动推送(节律勿扰时不打扰)
+                self.pet_bridge.push_event(ev)
+                if self.store:
+                    self.store.log_reminder("health_intervention")
+        except Exception:
+            pass
+        finally:
+            self._intervention_busy = False
+
+    def latest_intervention(self):
+        return intervention.read_state()
 
     def set_dnd(self, on):
         self.rhythm.set_dnd(on)
