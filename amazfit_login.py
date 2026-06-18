@@ -17,6 +17,7 @@ Zepp Life App(我的→设置→账号与安全)绑定邮箱并设置密码, 再
 import os
 import sys
 import json
+import time
 import getpass
 import datetime
 import urllib.parse
@@ -62,8 +63,15 @@ def _post(url, data, headers=None):
         return e.code, e.headers, e.read().decode("utf-8", "ignore")
 
 
-def get_access_code(email, password):
-    """Huami SSO: 邮箱密码 -> access code + country_code。"""
+_ERR_HINT = {
+    "401": "邮箱或密码不对；若是微信/手机号注册的账号, 需先在 Zepp Life App 绑定邮箱+设密码。",
+    "403": "账号被拒(可能未绑邮箱密码, 或需在 App 里完成安全验证)。",
+    "429": "华米限流(too many requests), 稍等几分钟再试, 不要连续重试。",
+}
+
+
+def get_access_code(email, password, retries=4):
+    """Huami SSO: 邮箱密码 -> access code + country_code。429 自动退避重试。"""
     url = ("https://api-user.huami.com/registrations/"
            + urllib.parse.quote(email, safe="") + "/tokens")
     data = {
@@ -71,17 +79,29 @@ def get_access_code(email, password):
         "redirect_uri": "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html",
         "token": "access", "password": password,
     }
-    code, headers, body = _post(url, data)
-    loc = headers.get("Location") if headers else None
-    if not loc:
-        raise RuntimeError("登录失败(没拿到跳转): HTTP {} {}".format(code, body[:200]))
-    q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
-    if "access" not in q:
-        # 常见: 邮箱/密码错、该账号没设邮箱密码(微信登录)、需验证码
-        raise RuntimeError("未取到 access code, 多半是邮箱/密码不对, 或该账号尚未绑定"
-                           "邮箱+密码(微信/第三方登录账号需先在 App 里补绑)。返回: "
-                           + json.dumps(q, ensure_ascii=False))
-    return q["access"][0], (q.get("country_code", ["CN"])[0])
+    backoff = [8, 20, 45, 90]
+    code = headers = body = None
+    for i in range(retries):
+        code, headers, body = _post(url, data)
+        loc = headers.get("Location") if headers else None
+        # 限流: 退避重试
+        if code == 429 or (loc and "error=429" in loc):
+            wait = backoff[min(i, len(backoff) - 1)]
+            print("    ⚠ 华米限流(429), {}s 后自动重试({}/{})…".format(wait, i + 1, retries))
+            time.sleep(wait)
+            continue
+        if not loc:
+            raise RuntimeError("登录失败(没拿到跳转): HTTP {} {}".format(code, body[:200]))
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+        if "access" in q:
+            return q["access"][0], (q.get("country_code", ["CN"])[0])
+        # 跳转里带 error= -> 给人话提示
+        err = (q.get("error") or [""])[0]
+        hint = _ERR_HINT.get(err, "")
+        raise RuntimeError("未取到 access code(error={}). {}".format(err or "?", hint
+                           or "多半是邮箱/密码或账号绑定问题。"))
+    raise RuntimeError("华米持续限流(429), 已重试 {} 次仍失败, 请过 10-30 分钟再试。"
+                       .format(retries))
 
 
 def login(access_code, country_code):
