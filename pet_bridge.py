@@ -1,26 +1,17 @@
 # -*- coding: utf-8 -*-
-"""把健康监测状态桥接给桌面宠物(claude-pet)。
+"""摄像头健康数据源 —— 把 worker-monitor 的实时判定写进统一健康状态契约。
 
-通过写本地文件 ~/.claude/pet_health.json 通信：
-  · factors  —— 当前活跃的不健康因素(驱动宠物造型/颜色变化, 持续反映)
-  · event    —— 新触发的一条健康建议(驱动宠物 10s 弹窗; 久坐/驼背附带体操引导)
+它是众多传感器插件中的一个(source="camera"), 通过 health_state.SourceWriter 写
+  ~/.claude/health/camera.json          —— 新: 多源聚合的脊柱
+并同时写旧的 ~/.claude/pet_health.json  —— 向后兼容, 老版桌宠仍可用。
 
-纯本地文件通信，不联网、不调用任何大模型。宠物未运行时也无副作用。
+本文件只承载"摄像头源特有"的领域知识: 干预建议文案(ADVICE)与优先级。其余通用的
+原子写入、多源聚合、严重度/元气值推导, 全部下沉到 health_state(双方共持的线协议)。
+纯本地、不联网、不调用任何大模型。宠物未运行时也无副作用。
 """
-import os
-import json
 import time
-import tempfile
 
-HEALTH_FILE = os.path.join(os.path.expanduser("~"), ".claude", "pet_health.json")
-
-# 因素 -> 严重度(取最高者决定宠物整体颜色)
-_SEVERITY = {
-    "drowsy": "alert", "high_stress": "alert",
-    "too_close": "warn", "slouch": "warn", "high_shoulder": "warn",
-    "need_move": "warn", "need_eye_break": "warn", "dry_eye": "warn",
-    "dark_env": "warn",
-}
+from health_state import SourceWriter, SEVERITY  # noqa: F401  (SEVERITY 供外部参考)
 
 # 建议事件文案(纯规则离线)。routine 非空 = 点击确认后引导做该套体操。
 ADVICE = {
@@ -41,38 +32,14 @@ _PRIORITY = ["need_move", "slouch", "high_shoulder", "drowsy", "high_stress",
 
 
 class PetBridge:
+    """名称保留向后兼容(monitor.py 仍 `from pet_bridge import PetBridge`)。
+    本质是 camera 数据源适配器: 被 monitor 主循环每帧推送, 不自轮询。"""
+
     def __init__(self, cfg):
         self.enabled = cfg.get("pet_integration", True)
-        self._event_id = 0
-        self._last_event = None
+        self._writer = SourceWriter("camera", also_legacy=True)
         self._last_factors = None
         self._last_write = 0.0
-        try:
-            os.makedirs(os.path.dirname(HEALTH_FILE), exist_ok=True)
-        except OSError:
-            self.enabled = False
-
-    def _atomic_write(self, data):
-        d = os.path.dirname(HEALTH_FILE)
-        try:
-            fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
-        except OSError:
-            return
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.replace(tmp, HEALTH_FILE)
-        except OSError:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-
-    @staticmethod
-    def _severity(factors):
-        if any(_SEVERITY.get(f) == "alert" for f in factors):
-            return "alert"
-        return "warn" if factors else "ok"
 
     @staticmethod
     def pick_event(fired_types):
@@ -83,28 +50,25 @@ class PetBridge:
         return sorted(cand, key=lambda t: _PRIORITY.index(t)
                       if t in _PRIORITY else 99)[0]
 
-    def update(self, present, factors, event=None, force=False):
+    def update(self, present, factors, event=None, metrics=None, force=False):
         """每个监测周期调用。
-        factors: 当前活跃不健康因素列表; event: 本轮新触发的建议类型(可 None)。"""
+        factors: 当前活跃不健康因素列表; event: 本轮新触发的建议类型(可 None);
+        metrics: 摄像头侧原始指标(seated_minutes/screen_minutes/bpm/stress…), 进 sources.camera。"""
         if not self.enabled:
             return
         now = time.time()
-        new_event = False
+        ev_payload = None
         if event and event in ADVICE:
-            self._event_id += 1
             title, body, routine = ADVICE[event]
-            self._last_event = {"id": self._event_id, "type": event,
-                                "title": title, "body": body, "routine": routine}
-            new_event = True
+            ev_payload = {"type": event, "title": title,
+                          "body": body, "routine": routine}
 
-        if not (new_event or force or factors != self._last_factors
+        # 节流: 仅在有新事件 / 因素变化 / 强制 / 超 2s 未写 时落盘(摄像头循环 ~10fps)
+        if not (ev_payload or force or factors != self._last_factors
                 or now - self._last_write > 2.0):
             return
 
-        payload = {"ts": now, "present": bool(present),
-                   "factors": list(factors), "severity": self._severity(factors)}
-        if self._last_event:
-            payload["event"] = self._last_event
-        self._atomic_write(payload)
+        self._writer.write(present=present, factors=list(factors),
+                           metrics=metrics, event=ev_payload)
         self._last_write = now
         self._last_factors = list(factors)

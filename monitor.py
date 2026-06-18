@@ -184,10 +184,15 @@ class Monitor:
                         self._await_break = True
                 self.active_reminders = self.reminders.current()
 
-                # 桥接到桌面宠物：真实因素 + 本轮新触发(经门控)的建议事件
+                # 桥接到桌面宠物：真实因素 + 本轮新触发(经门控)的建议事件 + 原始指标
                 factors = [k for k, v in conds.items() if v]
                 ev = self.pet_bridge.pick_event([r["type"] for r in fired])
-                self.pet_bridge.update(present, factors, event=ev)
+                cam_metrics = {
+                    "seated_minutes": pose_m.get("seated_minutes", 0),
+                    "screen_minutes": eye.get("screen_minutes", 0),
+                    "bpm": rp.get("bpm", 0), "stress": rp.get("stress", 0),
+                }
+                self.pet_bridge.update(present, factors, event=ev, metrics=cam_metrics)
 
                 # 周期采样(给管理视图趋势)
                 if now - last_sample_t >= cfg["sample_interval"] and self.store:

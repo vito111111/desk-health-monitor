@@ -20,14 +20,24 @@ class ReminderManager:
         self.cfg = cfg
         self.cooldowns = cfg.get("reminder_cooldowns", {})
         self.default_cd = cfg.get("reminder_default_cooldown", 120)
+        # 持续确认：问题须连续存在 sustain 秒才值得打断，过滤瞬时/轻微波动(如轻微高低肩)
+        self.sustain = cfg.get("reminder_sustain_seconds", {})
+        self.default_sustain = cfg.get("reminder_default_sustain", 5)
         self.last_fired = {}
+        self.on_since = {}  # type -> 本轮连续为真的起始时刻
         self.active = {}  # type -> {title, body, ts}
 
     def evaluate(self, conditions, now):
-        """conditions: {type: bool}; 返回本次新触发的提醒列表。"""
+        """conditions: {type: bool}; 返回本次新触发的提醒列表。
+        仅当某问题连续存在达到 sustain 秒、且距上次提醒超过冷却时才触发，避免刷屏。"""
         fired = []
         for typ, on in conditions.items():
             if on:
+                # 记录连续为真的起点；持续不够久则不打断
+                self.on_since.setdefault(typ, now)
+                sustain = self.sustain.get(typ, self.default_sustain)
+                if now - self.on_since[typ] < sustain:
+                    continue
                 cd = self.cooldowns.get(typ, self.default_cd)
                 if now - self.last_fired.get(typ, -1e9) >= cd:
                     self.last_fired[typ] = now
@@ -38,6 +48,8 @@ class ReminderManager:
                     if self.cfg.get("sound_alert", True):
                         self._beep()
             else:
+                # 问题消失：清除连续计时，下次须重新连续累计
+                self.on_since.pop(typ, None)
                 self.active.pop(typ, None)
         return fired
 

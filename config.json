@@ -40,8 +40,8 @@
     "neck_drop_exit": 0.09,
     "fwd_rise_enter": 0.15,
     "fwd_rise_exit": 0.09,
-    "shoulder_tilt_deg": 6.0,
-    "shoulder_tilt_exit_deg": 3.5,
+    "shoulder_tilt_deg": 8.5,
+    "shoulder_tilt_exit_deg": 4.5,
     "head_tilt_deg": 9.0,
     "body_lean_ratio": 0.16
   },
@@ -82,18 +82,32 @@
 
   "pet_integration": true,
 
-  "sound_alert": true,
+  "_sound_comment": "健康提醒改由桌宠右侧疲劳条以颜色+闪烁安静提示，故关闭蜂鸣；弹窗也已由疲劳条取代。",
+  "sound_alert": false,
   "reminder_default_cooldown": 120,
   "reminder_cooldowns": {
     "drowsy": 90,
-    "slouch": 60,
-    "high_shoulder": 90,
+    "slouch": 90,
+    "high_shoulder": 180,
     "need_move": 300,
     "need_eye_break": 300,
     "dry_eye": 180,
-    "too_close": 60,
+    "too_close": 90,
     "high_stress": 300,
     "dark_env": 600
+  },
+  "_sustain_comment": "问题须连续存在 N 秒才提醒，过滤瞬时/轻微波动；疲劳关乎安全故即时提醒。",
+  "reminder_default_sustain": 5,
+  "reminder_sustain_seconds": {
+    "drowsy": 0,
+    "slouch": 25,
+    "high_shoulder": 45,
+    "need_move": 0,
+    "need_eye_break": 0,
+    "dry_eye": 10,
+    "too_close": 12,
+    "high_stress": 10,
+    "dark_env": 20
   },
 
   "privacy_no_video_save": true,

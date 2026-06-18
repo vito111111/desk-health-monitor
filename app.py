@@ -20,7 +20,7 @@ from storage import Store
 BASE = Path(__file__).parent
 CFG = json.loads((BASE / "config.json").read_text(encoding="utf-8"))
 
-store = Store(str(BASE / CFG["db_path"]))
+store = Store(str(BASE / CFG["db_path"]), sample_interval=CFG.get("sample_interval", 30))
 monitor = Monitor(CFG, store=store)
 app = Flask(__name__)
 

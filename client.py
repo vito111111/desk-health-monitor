@@ -59,6 +59,23 @@ def ensure_pet():
         pass
 
 
+def ensure_wearables():
+    """拉起穿戴源守护(佳明/华米后台常驻拉取)。带单例端口锁, 已运行则自动跳过。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as t:
+            t.settimeout(0.3)
+            if t.connect_ex(("127.0.0.1", 50574)) == 0:
+                return  # 守护已在运行
+    except OSError:
+        pass
+    try:
+        subprocess.Popen([sys.executable, "-m", "sensors.run_all"],
+                         cwd=str(BASE),
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        pass
+
+
 def _serve():
     app.run(host=HOST, port=PORT, threaded=True, debug=False, use_reloader=False)
 
@@ -146,7 +163,8 @@ def main():
     # 后台启动 Web 服务 + 摄像头监控
     threading.Thread(target=_serve, daemon=True).start()
     threading.Thread(target=monitor.run, daemon=True).start()
-    ensure_pet()   # 拉起桌面宠物(健康联动展示端)
+    ensure_pet()         # 拉起桌面宠物(健康联动展示端)
+    ensure_wearables()   # 拉起穿戴源守护(佳明/华米后台拉数据)
     if not _wait_port():
         # 服务起不来：兜底用浏览器
         import webbrowser

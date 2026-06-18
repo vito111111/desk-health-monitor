@@ -8,8 +8,12 @@ import datetime as dt
 
 
 class Store:
-    def __init__(self, path):
+    def __init__(self, path, sample_interval=30):
         self.path = path
+        # 采样心跳间隔(秒)。聚合在岗时长时据此判断监测进程是否真在运行：
+        # 采样断档超过 live_gap 即视为监测停止，不计入在岗，避免跨夜/中途关停导致虚高。
+        self.sample_interval = sample_interval
+        self.live_gap = sample_interval * 3
         self.lock = threading.Lock()
         self._conn = sqlite3.connect(path, check_same_thread=False)
         c = self._conn
@@ -56,23 +60,53 @@ class Store:
         start = dt.datetime.combine(d, dt.time.min).timestamp()
         return start, start + 86400
 
+    def _live_intervals(self, start, end):
+        """监测进程真实在运行的时间段，依据采样心跳(每 sample_interval 秒一条)推断。
+        采样断档超过 live_gap 视为监测已停止，该段不计入在岗。
+        起点回看 live_gap 以衔接跨夜会话；每段末尾延长一个采样周期(进程在最后一条
+        采样之后通常还活着约一个周期才退出)。"""
+        with self.lock:
+            rows = self._conn.execute(
+                "SELECT ts FROM samples WHERE ts>=? AND ts<? ORDER BY ts",
+                (start - self.live_gap, end)).fetchall()
+        if not rows:
+            return []
+        segs = []
+        seg_start = prev = rows[0][0]
+        for (ts,) in rows[1:]:
+            if ts - prev > self.live_gap:
+                segs.append((seg_start, prev + self.sample_interval))
+                seg_start = ts
+            prev = ts
+        segs.append((seg_start, prev + self.sample_interval))
+        clipped = [(max(s, start), min(e, end)) for s, e in segs]
+        return [(s, e) for s, e in clipped if e > s]
+
     def daily_summary(self, day=None):
         start, end = self._day_bounds(day)
+        clip_end = min(end, time.time())
+        live = self._live_intervals(start, clip_end)
         with self.lock:
             rows = self._conn.execute(
                 "SELECT ts,state FROM events WHERE ts < ? ORDER BY ts", (end,)).fetchall()
         durations = {"focused": 0.0, "distracted": 0.0, "drowsy": 0.0, "away": 0.0}
         timeline, away_count = [], 0
-        clip_end = min(end, time.time())
+        counted_away = set()
         for i, (ts, state) in enumerate(rows):
             nxt = rows[i + 1][0] if i + 1 < len(rows) else clip_end
-            s, e = max(ts, start), min(nxt, clip_end)
-            if e <= s:
+            es, ee = max(ts, start), min(nxt, clip_end)
+            if ee <= es:
                 continue
-            durations[state] = durations.get(state, 0.0) + (e - s)
-            timeline.append({"state": state, "start": s, "end": e})
-            if state == "away" and ts >= start:
-                away_count += 1
+            # 仅统计与监测在线时段的交集，剔除进程关停期间的虚假时长
+            for ls, le in live:
+                s, e = max(es, ls), min(ee, le)
+                if e <= s:
+                    continue
+                durations[state] = durations.get(state, 0.0) + (e - s)
+                timeline.append({"state": state, "start": s, "end": e})
+                if state == "away" and ts >= start and ts not in counted_away:
+                    away_count += 1
+                    counted_away.add(ts)
         return {"durations": durations, "timeline": timeline,
                 "away_count": away_count,
                 "day": (day or dt.date.today()).isoformat()}
