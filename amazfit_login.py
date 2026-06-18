@@ -17,7 +17,6 @@ Zepp Life App(我的→设置→账号与安全)绑定邮箱并设置密码, 再
 import os
 import sys
 import json
-import time
 import getpass
 import datetime
 import urllib.parse
@@ -70,8 +69,10 @@ _ERR_HINT = {
 }
 
 
-def get_access_code(email, password, retries=4):
-    """Huami SSO: 邮箱密码 -> access code + country_code。429 自动退避重试。"""
+def get_access_code(email, password):
+    """Huami SSO: 邮箱密码 -> access code + country_code。
+    单次请求, 不自动连点 —— 华米按 IP/账号累积限流, 反复重试只会更快耗光额度。
+    碰到 429 直接抛出"等多久再试", 由用户隔开时间手动重跑。"""
     url = ("https://api-user.huami.com/registrations/"
            + urllib.parse.quote(email, safe="") + "/tokens")
     data = {
@@ -79,29 +80,19 @@ def get_access_code(email, password, retries=4):
         "redirect_uri": "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html",
         "token": "access", "password": password,
     }
-    backoff = [8, 20, 45, 90]
-    code = headers = body = None
-    for i in range(retries):
-        code, headers, body = _post(url, data)
-        loc = headers.get("Location") if headers else None
-        # 限流: 退避重试
-        if code == 429 or (loc and "error=429" in loc):
-            wait = backoff[min(i, len(backoff) - 1)]
-            print("    ⚠ 华米限流(429), {}s 后自动重试({}/{})…".format(wait, i + 1, retries))
-            time.sleep(wait)
-            continue
-        if not loc:
-            raise RuntimeError("登录失败(没拿到跳转): HTTP {} {}".format(code, body[:200]))
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
-        if "access" in q:
-            return q["access"][0], (q.get("country_code", ["CN"])[0])
-        # 跳转里带 error= -> 给人话提示
-        err = (q.get("error") or [""])[0]
-        hint = _ERR_HINT.get(err, "")
-        raise RuntimeError("未取到 access code(error={}). {}".format(err or "?", hint
-                           or "多半是邮箱/密码或账号绑定问题。"))
-    raise RuntimeError("华米持续限流(429), 已重试 {} 次仍失败, 请过 10-30 分钟再试。"
-                       .format(retries))
+    code, headers, body = _post(url, data)
+    loc = headers.get("Location") if headers else None
+    if code == 429 or (loc and "error=429" in loc):
+        raise RuntimeError("华米限流(429)。这是按 IP/账号的累积限流, 请**间隔 30-60 分钟"
+                           "再跑一次, 中途不要反复点**(每次尝试都会延长冷却)。")
+    if not loc:
+        raise RuntimeError("登录失败(没拿到跳转): HTTP {} {}".format(code, body[:200]))
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+    if "access" in q:
+        return q["access"][0], (q.get("country_code", ["CN"])[0])
+    err = (q.get("error") or [""])[0]
+    hint = _ERR_HINT.get(err, "多半是邮箱/密码或账号绑定问题。")
+    raise RuntimeError("未取到 access code(error={}). {}".format(err or "?", hint))
 
 
 def login(access_code, country_code):
